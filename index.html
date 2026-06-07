@@ -1,1 +1,103 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Мини Соцсеть</title>
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-auth-compat.js"></script>
+    <style>
+        body { font-family: system-ui; max-width: 600px; margin: auto; padding: 1rem; }
+        .post { border: 1px solid #ccc; margin: 1rem 0; padding: 1rem; border-radius: 12px; }
+        input, textarea { width: 100%; margin: 0.5rem 0; padding: 8px; }
+        button { background: #1e88e5; color: white; border: none; padding: 8px 16px; border-radius: 20px; }
+        .login { margin-top: 2rem; }
+    </style>
+</head>
+<body>
+    <h1>📱 Лента</h1>
+    <div id="auth"></div>
+    <div id="feed"></div>
 
+    <script>
+        // Конфиг Firebase (бесплатно создаётся за 2 минуты на console.firebase.google.com)
+        const firebaseConfig = {
+            apiKey: "ВАШ_API_KEY",
+            authDomain: "ВАШ_ПРОЕКТ.firebaseapp.com",
+            projectId: "ВАШ_ПРОЕКТ",
+            storageBucket: "ВАШ_ПРОЕКТ.appspot.com",
+            messagingSenderId: "123456",
+            appId: "1:123456:web:abc"
+        };
+
+        firebase.initializeApp(firebaseConfig);
+        const db = firebase.firestore();
+        const auth = firebase.auth();
+
+        function showFeed() {
+            db.collection("posts").orderBy("createdAt", "desc").onSnapshot(snapshot => {
+                const feedDiv = document.getElementById("feed");
+                feedDiv.innerHTML = "";
+                snapshot.forEach(doc => {
+                    const data = doc.data();
+                    feedDiv.innerHTML += `<div class="post">
+                        <strong>${data.author}</strong><br>
+                        ${data.text}<br>
+                        <small>${data.createdAt?.toDate?.() || new Date()}</small>
+                    </div>`;
+                });
+            });
+        }
+
+        function renderAuth() {
+            const user = auth.currentUser;
+            const authDiv = document.getElementById("auth");
+            if (!user) {
+                authDiv.innerHTML = `<div class="login">
+                    <input id="nick" placeholder="Ваше имя"><br>
+                    <input id="email" placeholder="email@example.com" type="email"><br>
+                    <input id="pass" placeholder="пароль" type="password"><br>
+                    <button onclick="signUp()">Зарегистрироваться</button>
+                    <button onclick="signIn()">Войти</button>
+                </div>`;
+            } else {
+                authDiv.innerHTML = `<div>Вы вошли как ${user.displayName || user.email}
+                    <button onclick="logout()">Выйти</button>
+                </div>
+                <textarea id="postText" placeholder="Что нового?" rows="2"></textarea>
+                <button onclick="addPost()">Опубликовать</button>`;
+            }
+        }
+
+        window.signUp = async () => {
+            const email = document.getElementById("email").value;
+            const pass = document.getElementById("pass").value;
+            const nick = document.getElementById("nick").value;
+            const cred = await auth.createUserWithEmailAndPassword(email, pass);
+            await cred.user.updateProfile({ displayName: nick });
+            renderAuth();
+        };
+        window.signIn = async () => {
+            const email = document.getElementById("email").value;
+            const pass = document.getElementById("pass").value;
+            await auth.signInWithEmailAndPassword(email, pass);
+            renderAuth();
+        };
+        window.logout = () => auth.signOut().then(() => renderAuth());
+        window.addPost = async () => {
+            const text = document.getElementById("postText").value;
+            if (!text) return;
+            await db.collection("posts").add({
+                text,
+                author: auth.currentUser.displayName || auth.currentUser.email,
+                createdAt: firebase.firestore.FieldValue.serverTimestamp()
+            });
+            document.getElementById("postText").value = "";
+        };
+
+        auth.onAuthStateChanged(() => {
+            renderAuth();
+            if (auth.currentUser) showFeed();
+        });
+    </script>
+</body>
+</html>
