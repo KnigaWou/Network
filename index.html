@@ -1,103 +1,344 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Мини Соцсеть</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Текстовая Соцсеть | Минимум трафика</title>
     <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-auth-compat.js"></script>
     <style>
-        body { font-family: system-ui; max-width: 600px; margin: auto; padding: 1rem; }
-        .post { border: 1px solid #ccc; margin: 1rem 0; padding: 1rem; border-radius: 12px; }
-        input, textarea { width: 100%; margin: 0.5rem 0; padding: 8px; }
-        button { background: #1e88e5; color: white; border: none; padding: 8px 16px; border-radius: 20px; }
-        .login { margin-top: 2rem; }
+        * { box-sizing: border-box; }
+        body { font-family: system-ui, -apple-system, 'Segoe UI', sans-serif; max-width: 700px; margin: 0 auto; padding: 1rem; background: #f0f2f5; }
+        
+        /* Интерфейс чатов */
+        .chat-list { background: white; border-radius: 16px; padding: 0.5rem; margin-bottom: 1rem; }
+        .chat-item { padding: 0.75rem; border-bottom: 1px solid #e0e0e0; cursor: pointer; display: flex; justify-content: space-between; align-items: center; }
+        .chat-item:hover { background: #f5f5f5; }
+        .chat-name { font-weight: bold; }
+        .chat-delete { color: red; cursor: pointer; font-size: 1.2rem; padding: 0 0.5rem; }
+        
+        /* Окно сообщений */
+        .messages-area { background: white; border-radius: 16px; padding: 1rem; margin-bottom: 1rem; max-height: 400px; overflow-y: auto; }
+        .message { padding: 0.5rem; margin: 0.5rem 0; border-radius: 12px; background: #e3f2fd; }
+        .message-own { background: #c8e6c9; text-align: right; }
+        .message-author { font-weight: bold; font-size: 0.85rem; color: #1e88e5; }
+        .message-text { margin: 0.25rem 0; word-wrap: break-word; }
+        .message-time { font-size: 0.7rem; color: #666; }
+        .delete-msg { color: red; cursor: pointer; font-size: 0.7rem; margin-left: 0.5rem; }
+        
+        /* Ввод сообщения */
+        .input-area { background: white; border-radius: 16px; padding: 1rem; position: sticky; bottom: 0; }
+        textarea { width: 100%; padding: 0.75rem; border: 1px solid #ddd; border-radius: 12px; font-family: inherit; font-size: 1rem; resize: vertical; }
+        button { background: #1e88e5; color: white; border: none; padding: 0.6rem 1.2rem; border-radius: 24px; cursor: pointer; font-size: 0.9rem; margin-top: 0.5rem; }
+        button.danger { background: #dc3545; }
+        button.secondary { background: #6c757d; }
+        
+        /* Логин */
+        .login-box { background: white; border-radius: 24px; padding: 2rem; max-width: 400px; margin: 2rem auto; }
+        input { width: 100%; padding: 0.75rem; margin: 0.5rem 0; border: 1px solid #ddd; border-radius: 12px; }
+        
+        .current-chat { font-weight: bold; margin: 0.5rem 0; }
+        .user-info { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; padding: 0.5rem; background: white; border-radius: 12px; }
     </style>
 </head>
 <body>
-    <h1>📱 Лента</h1>
-    <div id="auth"></div>
-    <div id="feed"></div>
+    <div id="app"></div>
 
     <script>
-        // Конфиг Firebase (бесплатно создаётся за 2 минуты на console.firebase.google.com)
+        // ⚠️ ВСТАВЬТЕ ВАШ КОНФИГ ИЗ FIREBASE ⚠️
         const firebaseConfig = {
             apiKey: "ВАШ_API_KEY",
-            authDomain: "ВАШ_ПРОЕКТ.firebaseapp.com",
-            projectId: "ВАШ_ПРОЕКТ",
-            storageBucket: "ВАШ_ПРОЕКТ.appspot.com",
-            messagingSenderId: "123456",
-            appId: "1:123456:web:abc"
+            authDomain: "network-6c0e9.firebaseapp.com",
+            projectId: "network-6c0e9",
+            storageBucket: "network-6c0e9.appspot.com",
+            messagingSenderId: "123456789",
+            appId: "1:123456789:web:abcdef"
         };
 
         firebase.initializeApp(firebaseConfig);
         const db = firebase.firestore();
         const auth = firebase.auth();
+        
+        let currentUser = null;
+        let currentChatId = null;
+        let unsubscribeMessages = null;
 
-        function showFeed() {
-            db.collection("posts").orderBy("createdAt", "desc").onSnapshot(snapshot => {
-                const feedDiv = document.getElementById("feed");
-                feedDiv.innerHTML = "";
-                snapshot.forEach(doc => {
-                    const data = doc.data();
-                    feedDiv.innerHTML += `<div class="post">
-                        <strong>${data.author}</strong><br>
-                        ${data.text}<br>
-                        <small>${data.createdAt?.toDate?.() || new Date()}</small>
-                    </div>`;
+        // Функции для работы с чатами
+        async function createChat() {
+            const chatName = prompt('Название чата:');
+            if (!chatName) return;
+            
+            await db.collection('chats').add({
+                name: chatName,
+                createdBy: currentUser.uid,
+                createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+                members: [currentUser.uid]
+            });
+        }
+        
+        async function deleteChat(chatId, chatName) {
+            if (!confirm(`Удалить чат "${chatName}"? Все сообщения удалятся.`)) return;
+            
+            // Удаляем все сообщения чата
+            const messagesRef = db.collection('chats').doc(chatId).collection('messages');
+            const snapshot = await messagesRef.get();
+            const batch = db.batch();
+            snapshot.forEach(doc => batch.delete(doc.ref));
+            await batch.commit();
+            
+            // Удаляем сам чат
+            await db.collection('chats').doc(chatId).delete();
+            
+            if (currentChatId === chatId) {
+                currentChatId = null;
+                if (unsubscribeMessages) unsubscribeMessages();
+                renderApp();
+            }
+        }
+        
+        async function joinChat(chatId) {
+            const chatRef = db.collection('chats').doc(chatId);
+            const chatDoc = await chatRef.get();
+            const members = chatDoc.data().members || [];
+            
+            if (!members.includes(currentUser.uid)) {
+                await chatRef.update({
+                    members: [...members, currentUser.uid]
+                });
+            }
+            currentChatId = chatId;
+            renderApp();
+        }
+        
+        // Отправка сообщения
+        async function sendMessage() {
+            const text = document.getElementById('messageText')?.value;
+            if (!text?.trim()) return;
+            
+            await db.collection('chats').doc(currentChatId).collection('messages').add({
+                text: text.trim(),
+                authorId: currentUser.uid,
+                authorName: currentUser.displayName || currentUser.email,
+                timestamp: firebase.firestore.FieldValue.serverTimestamp()
+            });
+            
+            document.getElementById('messageText').value = '';
+            // Автоскролл вниз
+            setTimeout(() => {
+                const msgsDiv = document.getElementById('messagesContainer');
+                if (msgsDiv) msgsDiv.scrollTop = msgsDiv.scrollHeight;
+            }, 100);
+        }
+        
+        async function deleteMessage(chatId, messageId) {
+            await db.collection('chats').doc(chatId).collection('messages').doc(messageId).delete();
+        }
+        
+        // Удалить все свои сообщения в чате
+        async function deleteMyMessages() {
+            if (!confirm('Удалить ВСЕ свои сообщения в этом чате?')) return;
+            const messagesRef = db.collection('chats').doc(currentChatId).collection('messages');
+            const snapshot = await messagesRef.where('authorId', '==', currentUser.uid).get();
+            const batch = db.batch();
+            snapshot.forEach(doc => batch.delete(doc.ref));
+            await batch.commit();
+        }
+        
+        // Очистить весь чат (только для создателя)
+        async function clearWholeChat() {
+            const chatDoc = await db.collection('chats').doc(currentChatId).get();
+            if (chatDoc.data().createdBy !== currentUser.uid) {
+                alert('Только создатель чата может очистить все сообщения');
+                return;
+            }
+            if (!confirm('Очистить ВСЕ сообщения в чате? (необратимо)')) return;
+            
+            const messagesRef = db.collection('chats').doc(currentChatId).collection('messages');
+            const snapshot = await messagesRef.get();
+            const batch = db.batch();
+            snapshot.forEach(doc => batch.delete(doc.ref));
+            await batch.commit();
+        }
+        
+        // Регистрация и вход
+        async function register() {
+            const email = document.getElementById('regEmail').value;
+            const pass = document.getElementById('regPass').value;
+            const name = document.getElementById('regName').value;
+            try {
+                const cred = await auth.createUserWithEmailAndPassword(email, pass);
+                await cred.user.updateProfile({ displayName: name });
+                alert('Регистрация успешна!');
+                renderApp();
+            } catch(e) { alert('Ошибка: ' + e.message); }
+        }
+        
+        async function login() {
+            const email = document.getElementById('loginEmail').value;
+            const pass = document.getElementById('loginPass').value;
+            try {
+                await auth.signInWithEmailAndPassword(email, pass);
+                alert('Добро пожаловать!');
+                renderApp();
+            } catch(e) { alert('Ошибка: ' + e.message); }
+        }
+        
+        function logout() { 
+            auth.signOut(); 
+            currentChatId = null;
+            if (unsubscribeMessages) unsubscribeMessages();
+            renderApp(); 
+        }
+        
+        // Отрисовка чатов
+        function renderChatsList() {
+            return new Promise((resolve) => {
+                db.collection('chats').orderBy('createdAt', 'desc').onSnapshot((snapshot) => {
+                    const chatsDiv = document.getElementById('chatsList');
+                    if (!chatsDiv) return;
+                    
+                    let html = '<div class="chat-list"><div style="padding:0.5rem;"><button onclick="createChat()">➕ Новый чат</button></div>';
+                    snapshot.forEach(doc => {
+                        const chat = doc.data();
+                        const isMember = chat.members?.includes(currentUser.uid);
+                        if (!isMember) return;
+                        
+                        html += `
+                            <div class="chat-item">
+                                <div class="chat-name" onclick="joinChat('${doc.id}')">💬 ${escapeHtml(chat.name)}</div>
+                                <div class="chat-delete" onclick="deleteChat('${doc.id}', '${escapeHtml(chat.name)}')">🗑️</div>
+                            </div>
+                        `;
+                    });
+                    html += '</div>';
+                    chatsDiv.innerHTML = html;
+                    resolve();
                 });
             });
         }
-
-        function renderAuth() {
-            const user = auth.currentUser;
-            const authDiv = document.getElementById("auth");
-            if (!user) {
-                authDiv.innerHTML = `<div class="login">
-                    <input id="nick" placeholder="Ваше имя"><br>
-                    <input id="email" placeholder="email@example.com" type="email"><br>
-                    <input id="pass" placeholder="пароль" type="password"><br>
-                    <button onclick="signUp()">Зарегистрироваться</button>
-                    <button onclick="signIn()">Войти</button>
-                </div>`;
-            } else {
-                authDiv.innerHTML = `<div>Вы вошли как ${user.displayName || user.email}
-                    <button onclick="logout()">Выйти</button>
+        
+        // Отрисовка сообщений
+        function renderMessages(chatId) {
+            if (unsubscribeMessages) unsubscribeMessages();
+            
+            const container = document.getElementById('messagesContainer');
+            if (!container) return;
+            
+            const messagesRef = db.collection('chats').doc(chatId).collection('messages').orderBy('timestamp', 'asc');
+            unsubscribeMessages = messagesRef.onSnapshot((snapshot) => {
+                let html = '';
+                snapshot.forEach(doc => {
+                    const msg = doc.data();
+                    const isOwn = msg.authorId === currentUser.uid;
+                    html += `
+                        <div class="message ${isOwn ? 'message-own' : ''}">
+                            <div class="message-author">${escapeHtml(msg.authorName)}</div>
+                            <div class="message-text">${escapeHtml(msg.text)}</div>
+                            <div class="message-time">
+                                ${msg.timestamp?.toDate().toLocaleTimeString() || 'только что'}
+                                ${isOwn ? `<span class="delete-msg" onclick="deleteMessage('${chatId}', '${doc.id}')">[удалить]</span>` : ''}
+                            </div>
+                        </div>
+                    `;
+                });
+                container.innerHTML = html || '<div style="text-align:center;color:#999;">Нет сообщений. Напишите первым!</div>';
+                container.scrollTop = container.scrollHeight;
+            });
+        }
+        
+        function escapeHtml(str) { 
+            if (!str) return '';
+            return str.replace(/[&<>]/g, function(m){
+                if(m==='&') return '&amp;';
+                if(m==='<') return '&lt;';
+                if(m==='>') return '&gt;';
+                return m;
+            }); 
+        }
+        
+        // Главный рендер
+        async function renderApp() {
+            const appDiv = document.getElementById('app');
+            if (!currentUser) {
+                appDiv.innerHTML = `
+                    <div class="login-box">
+                        <h2>✏️ Вход</h2>
+                        <input id="loginEmail" placeholder="Email" type="email">
+                        <input id="loginPass" placeholder="Пароль" type="password">
+                        <button onclick="login()">Войти</button>
+                        <hr>
+                        <h3>📝 Регистрация</h3>
+                        <input id="regName" placeholder="Ваше имя">
+                        <input id="regEmail" placeholder="Email" type="email">
+                        <input id="regPass" placeholder="Пароль" type="password">
+                        <button onclick="register()">Зарегистрироваться</button>
+                    </div>
+                `;
+                return;
+            }
+            
+            appDiv.innerHTML = `
+                <div class="user-info">
+                    <span>👤 ${escapeHtml(currentUser.displayName || currentUser.email)}</span>
+                    <button onclick="logout()" class="secondary">Выйти</button>
                 </div>
-                <textarea id="postText" placeholder="Что нового?" rows="2"></textarea>
-                <button onclick="addPost()">Опубликовать</button>`;
+                <div id="chatsList">Загрузка чатов...</div>
+                <div id="chatArea">
+                    ${currentChatId ? `
+                        <div class="current-chat">
+                            <button onclick="deleteMyMessages()" class="danger">🗑️ Удалить мои сообщения</button>
+                            <button onclick="clearWholeChat()" class="danger">⚠️ Очистить весь чат</button>
+                        </div>
+                        <div id="messagesContainer" class="messages-area"></div>
+                        <div class="input-area">
+                            <textarea id="messageText" placeholder="Сообщение..." rows="2" autocomplete="off"></textarea>
+                            <button onclick="sendMessage()">📤 Отправить</button>
+                        </div>
+                    ` : '<div style="text-align:center;padding:2rem;">Выберите чат слева или создайте новый</div>'}
+                </div>
+            `;
+            
+            await renderChatsList();
+            if (currentChatId) {
+                renderMessages(currentChatId);
+            }
+            
+            // Автофокус на поле ввода
+            const textarea = document.getElementById('messageText');
+            if (textarea) {
+                textarea.focus();
+                textarea.addEventListener('keypress', (e) => {
+                    if (e.key === 'Enter' && !e.shiftKey) {
+                        e.preventDefault();
+                        sendMessage();
+                    }
+                });
             }
         }
-
-        window.signUp = async () => {
-            const email = document.getElementById("email").value;
-            const pass = document.getElementById("pass").value;
-            const nick = document.getElementById("nick").value;
-            const cred = await auth.createUserWithEmailAndPassword(email, pass);
-            await cred.user.updateProfile({ displayName: nick });
-            renderAuth();
-        };
-        window.signIn = async () => {
-            const email = document.getElementById("email").value;
-            const pass = document.getElementById("pass").value;
-            await auth.signInWithEmailAndPassword(email, pass);
-            renderAuth();
-        };
-        window.logout = () => auth.signOut().then(() => renderAuth());
-        window.addPost = async () => {
-            const text = document.getElementById("postText").value;
-            if (!text) return;
-            await db.collection("posts").add({
-                text,
-                author: auth.currentUser.displayName || auth.currentUser.email,
-                createdAt: firebase.firestore.FieldValue.serverTimestamp()
-            });
-            document.getElementById("postText").value = "";
-        };
-
-        auth.onAuthStateChanged(() => {
-            renderAuth();
-            if (auth.currentUser) showFeed();
+        
+        auth.onAuthStateChanged(user => {
+            currentUser = user;
+            if (!user && unsubscribeMessages) {
+                unsubscribeMessages();
+                unsubscribeMessages = null;
+            }
+            renderApp();
         });
+        
+        // Глобальные функции для onclick
+        window.createChat = createChat;
+        window.deleteChat = deleteChat;
+        window.joinChat = joinChat;
+        window.sendMessage = sendMessage;
+        window.deleteMessage = deleteMessage;
+        window.deleteMyMessages = deleteMyMessages;
+        window.clearWholeChat = clearWholeChat;
+        window.login = login;
+        window.register = register;
+        window.logout = logout;
+        
+        renderApp();
     </script>
 </body>
 </html>
