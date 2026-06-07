@@ -2,34 +2,58 @@
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>Чики Пуки Соцсеть</title>
+    <title>Чики Пуки Соцсеть | Фото + Онлайн</title>
     <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-database-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-storage-compat.js"></script>
     <style>
         * { box-sizing: border-box; }
-        body { font-family: system-ui, -apple-system, 'Segoe UI', sans-serif; max-width: 700px; margin: 0 auto; padding: 1rem; background: #f0f2f5; }
-        .chat-list { background: white; border-radius: 16px; padding: 0.5rem; margin-bottom: 1rem; }
+        body { font-family: system-ui, -apple-system, 'Segoe UI', sans-serif; max-width: 900px; margin: 0 auto; padding: 1rem; background: #f0f2f5; }
+        
+        /* Две колонки */
+        .flex-container { display: flex; gap: 1rem; flex-wrap: wrap; }
+        .sidebar { flex: 1; min-width: 200px; }
+        .main { flex: 2; min-width: 300px; }
+        
+        /* Онлайн-пользователи */
+        .online-list { background: white; border-radius: 16px; padding: 0.5rem; margin-bottom: 1rem; }
+        .online-user { padding: 0.5rem; border-bottom: 1px solid #e0e0e0; display: flex; justify-content: space-between; align-items: center; }
+        .online-user:last-child { border-bottom: none; }
+        .online-name { font-weight: bold; color: #1e88e5; }
+        .invite-btn { background: #4caf50; color: white; border: none; padding: 4px 12px; border-radius: 20px; cursor: pointer; font-size: 0.75rem; }
+        .invite-btn:hover { background: #45a049; }
+        .online-badge { display: inline-block; width: 10px; height: 10px; background: #4caf50; border-radius: 50%; margin-right: 8px; animation: pulse 1.5s infinite; }
+        @keyframes pulse { 0% { opacity: 0.5; } 50% { opacity: 1; } 100% { opacity: 0.5; } }
+        
+        .chat-list { background: white; border-radius: 16px; padding: 0.5rem; margin-bottom: 1rem; max-height: 300px; overflow-y: auto; }
         .chat-item { padding: 0.75rem; border-bottom: 1px solid #e0e0e0; cursor: pointer; display: flex; justify-content: space-between; align-items: center; }
         .chat-item:hover { background: #f5f5f5; }
         .chat-name { font-weight: bold; flex: 1; }
         .chat-delete { color: red; cursor: pointer; font-size: 1.2rem; padding: 0 0.5rem; }
+        
         .messages-area { background: white; border-radius: 16px; padding: 1rem; margin-bottom: 1rem; height: 400px; overflow-y: auto; }
         .message { padding: 0.5rem; margin: 0.5rem 0; border-radius: 12px; background: #e3f2fd; }
         .message-own { background: #c8e6c9; text-align: right; }
         .message-author { font-weight: bold; font-size: 0.85rem; color: #1e88e5; }
         .message-text { margin: 0.25rem 0; word-wrap: break-word; }
+        .message-image { max-width: 100%; max-height: 200px; border-radius: 12px; margin-top: 8px; cursor: pointer; }
         .message-time { font-size: 0.7rem; color: #666; }
         .delete-msg { color: red; cursor: pointer; font-size: 0.7rem; margin-left: 0.5rem; }
+        
         .input-area { background: white; border-radius: 16px; padding: 1rem; position: sticky; bottom: 0; }
         textarea { width: 100%; padding: 0.75rem; border: 1px solid #ddd; border-radius: 12px; font-family: inherit; font-size: 1rem; resize: vertical; }
         button { background: #1e88e5; color: white; border: none; padding: 0.6rem 1.2rem; border-radius: 24px; cursor: pointer; font-size: 0.9rem; margin-top: 0.5rem; margin-right: 0.5rem; }
         button.danger { background: #dc3545; }
         button.secondary { background: #6c757d; }
+        .file-label { background: #4caf50; display: inline-block; padding: 0.6rem 1.2rem; border-radius: 24px; color: white; cursor: pointer; margin-top: 0.5rem; margin-right: 0.5rem; font-size: 0.9rem; }
+        
         .login-box { background: white; border-radius: 24px; padding: 2rem; max-width: 400px; margin: 2rem auto; }
         input { width: 100%; padding: 0.75rem; margin: 0.5rem 0; border: 1px solid #ddd; border-radius: 12px; }
         .user-info { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; padding: 0.5rem; background: white; border-radius: 12px; }
         .current-chat-title { font-weight: bold; margin: 0.5rem 0; padding: 0.5rem; background: #e3f2fd; border-radius: 12px; }
+        
+        @media (max-width: 700px) { .flex-container { flex-direction: column; } }
     </style>
 </head>
 <body>
@@ -50,12 +74,74 @@
     firebase.initializeApp(firebaseConfig);
     const db = firebase.database();
     const auth = firebase.auth();
+    const storage = firebase.storage();
 
     let currentUser = null;
     let currentChatId = null;
     let messagesListener = null;
+    let onlineListener = null;
+    let presenceRef = null;
 
-    // Регистрация
+    // ========== ОНЛАЙН-СТАТУС ==========
+    function setOnlineStatus() {
+        if (!currentUser) return;
+        const userStatusRef = db.ref(`online/${currentUser.uid}`);
+        const userStatus = {
+            name: currentUser.displayName || currentUser.email,
+            email: currentUser.email,
+            lastSeen: firebase.database.ServerValue.TIMESTAMP,
+            online: true
+        };
+        userStatusRef.set(userStatus);
+        userStatusRef.onDisconnect().update({ online: false, lastSeen: firebase.database.ServerValue.TIMESTAMP });
+    }
+
+    // ========== ЗАГРУЗКА ФОТО ==========
+    async function uploadPhoto(file) {
+        if (!file) return null;
+        const fileName = `${Date.now()}_${file.name}`;
+        const storageRef = storage.ref(`photos/${fileName}`);
+        
+        // Сжатие фото (максимум 500 КБ)
+        const compressed = await compressImage(file);
+        const blob = await (await fetch(compressed)).blob();
+        await storageRef.put(blob);
+        return await storageRef.getDownloadURL();
+    }
+
+    function compressImage(file) {
+        return new Promise((resolve) => {
+            const reader = new FileReader();
+            reader.readAsDataURL(file);
+            reader.onload = (e) => {
+                const img = new Image();
+                img.src = e.target.result;
+                img.onload = () => {
+                    const canvas = document.createElement('canvas');
+                    let width = img.width;
+                    let height = img.height;
+                    const maxWidth = 800;
+                    if (width > maxWidth) {
+                        height = (height * maxWidth) / width;
+                        width = maxWidth;
+                    }
+                    canvas.width = width;
+                    canvas.height = height;
+                    const ctx = canvas.getContext('2d');
+                    ctx.drawImage(img, 0, 0, width, height);
+                    let quality = 0.7;
+                    let result = canvas.toDataURL('image/jpeg', quality);
+                    while (result.length > 500 * 1024 && quality > 0.3) {
+                        quality -= 0.1;
+                        result = canvas.toDataURL('image/jpeg', quality);
+                    }
+                    resolve(result);
+                };
+            };
+        });
+    }
+
+    // ========== РЕГИСТРАЦИЯ/ВХОД ==========
     async function register() {
         const email = document.getElementById('regEmail').value;
         const pass = document.getElementById('regPass').value;
@@ -67,7 +153,6 @@
         } catch(e) { alert('Ошибка: ' + e.message); }
     }
 
-    // Вход
     async function login() {
         const email = document.getElementById('loginEmail').value;
         const pass = document.getElementById('loginPass').value;
@@ -78,7 +163,7 @@
 
     function logout() { auth.signOut(); }
 
-    // Создать чат
+    // ========== ЧАТЫ ==========
     async function createChat() {
         const name = prompt('Название чата:');
         if (!name) return;
@@ -86,11 +171,11 @@
         await chatRef.set({
             name: name,
             createdBy: currentUser.uid,
-            createdAt: Date.now()
+            createdAt: Date.now(),
+            members: [currentUser.uid]
         });
     }
 
-    // Удалить чат
     async function deleteChat(chatId, chatName) {
         if (!confirm(`Удалить чат "${chatName}"?`)) return;
         await db.ref(`chats/${chatId}`).remove();
@@ -99,32 +184,61 @@
         renderApp();
     }
 
-    // Отправить сообщение
+    async function inviteToChat(userId, userName) {
+        if (!currentChatId) {
+            alert('Сначала выберите чат');
+            return;
+        }
+        const chatRef = db.ref(`chats/${currentChatId}`);
+        const snap = await chatRef.get();
+        const members = snap.val()?.members || [];
+        if (members.includes(userId)) {
+            alert(`${userName} уже в чате`);
+            return;
+        }
+        members.push(userId);
+        await chatRef.update({ members: members });
+        alert(`${userName} приглашён в чат!`);
+    }
+
     async function sendMessage() {
         const text = document.getElementById('messageText')?.value;
-        if (!text?.trim()) return;
+        const fileInput = document.getElementById('photoFile');
+        const file = fileInput?.files[0];
+        
+        if (!text?.trim() && !file) {
+            alert('Напишите текст или добавьте фото');
+            return;
+        }
+        
+        let photoUrl = null;
+        if (file) {
+            photoUrl = await uploadPhoto(file);
+            fileInput.value = '';
+        }
+        
         await db.ref(`messages/${currentChatId}`).push({
-            text: text.trim(),
+            text: text?.trim() || '',
+            photoUrl: photoUrl,
             authorId: currentUser.uid,
             authorName: currentUser.displayName || currentUser.email,
             timestamp: Date.now()
         });
-        document.getElementById('messageText').value = '';
+        
+        if (document.getElementById('messageText')) document.getElementById('messageText').value = '';
         setTimeout(() => {
             const container = document.getElementById('messagesContainer');
             if (container) container.scrollTop = container.scrollHeight;
         }, 100);
     }
 
-    // Удалить своё сообщение
     async function deleteMessage(chatId, msgId, authorId) {
         if (authorId !== currentUser.uid) return;
         await db.ref(`messages/${chatId}/${msgId}`).remove();
     }
 
-    // Удалить все свои сообщения
     async function deleteMyMessages() {
-        if (!confirm('Удалить все свои сообщения?')) return;
+        if (!confirm('Удалить ВСЕ свои сообщения в этом чате?')) return;
         const msgsRef = db.ref(`messages/${currentChatId}`);
         const snapshot = await msgsRef.get();
         const updates = {};
@@ -136,7 +250,6 @@
         await msgsRef.update(updates);
     }
 
-    // Очистить весь чат (только создатель)
     async function clearWholeChat() {
         const chatRef = db.ref(`chats/${currentChatId}`);
         const snap = await chatRef.get();
@@ -144,18 +257,17 @@
             alert('Только создатель чата может очистить все сообщения');
             return;
         }
-        if (!confirm('Очистить ВСЕ сообщения?')) return;
+        if (!confirm('Очистить ВСЕ сообщения в чате?')) return;
         await db.ref(`messages/${currentChatId}`).remove();
     }
 
-    // Выбрать чат
     function joinChat(chatId) {
         if (messagesListener) messagesListener();
         currentChatId = chatId;
         renderApp();
     }
 
-    // Отрисовка
+    // ========== ОТРИСОВКА ==========
     function renderApp() {
         const app = document.getElementById('app');
         if (!currentUser) {
@@ -181,33 +293,68 @@
                 <span>👤 ${escapeHtml(currentUser.displayName || currentUser.email)}</span>
                 <button onclick="logout()" class="secondary">Выйти</button>
             </div>
-            <button onclick="createChat()">➕ Новый чат</button>
-            <div id="chatsList"></div>
-            <div id="chatArea">
-                ${currentChatId ? `
-                    <div class="current-chat-title">
-                        <div id="chatTitle"></div>
-                        <div style="margin-top: 10px;">
-                            <button onclick="deleteMyMessages()" class="danger">🗑️ Мои сообщения</button>
-                            <button onclick="clearWholeChat()" class="danger">⚠️ Очистить чат</button>
-                        </div>
+            <div class="flex-container">
+                <div class="sidebar">
+                    <div id="onlineList" class="online-list">Загрузка онлайн...</div>
+                    <button onclick="createChat()" style="width:100%; margin-bottom:10px;">➕ Новый чат</button>
+                    <div id="chatsList" class="chat-list">Загрузка чатов...</div>
+                </div>
+                <div class="main">
+                    <div id="chatArea">
+                        ${currentChatId ? `
+                            <div class="current-chat-title">
+                                <div id="chatTitle"></div>
+                                <div style="margin-top: 10px;">
+                                    <button onclick="deleteMyMessages()" class="danger">🗑️ Мои сообщения</button>
+                                    <button onclick="clearWholeChat()" class="danger">⚠️ Очистить чат</button>
+                                </div>
+                            </div>
+                            <div id="messagesContainer" class="messages-area"></div>
+                            <div class="input-area">
+                                <textarea id="messageText" placeholder="Сообщение..." rows="2"></textarea>
+                                <input type="file" id="photoFile" accept="image/*" style="display:none;">
+                                <button onclick="document.getElementById('photoFile').click()" class="file-label">📷 Фото</button>
+                                <button onclick="sendMessage()">📤 Отправить</button>
+                            </div>
+                        ` : '<div style="text-align:center;padding:2rem;">✨ Выберите чат слева или создайте новый ✨</div>'}
                     </div>
-                    <div id="messagesContainer" class="messages-area"></div>
-                    <div class="input-area">
-                        <textarea id="messageText" placeholder="Сообщение..." rows="2"></textarea>
-                        <button onclick="sendMessage()">📤 Отправить</button>
-                    </div>
-                ` : '<div style="text-align:center;padding:2rem;">✨ Выберите чат слева ✨</div>'}
+                </div>
             </div>
         `;
 
-        // Список чатов
+        // Онлайн-пользователи
+        if (onlineListener) onlineListener();
+        onlineListener = db.ref('online').on('value', (snapshot) => {
+            const onlineDiv = document.getElementById('onlineList');
+            if (!onlineDiv) return;
+            let html = '<h4>🟢 Онлайн (<span id="onlineCount">0</span>)</h4>';
+            let count = 0;
+            snapshot.forEach(child => {
+                const user = child.val();
+                if (user.online === true && child.key !== currentUser.uid) {
+                    count++;
+                    html += `
+                        <div class="online-user">
+                            <div class="online-name"><span class="online-badge"></span>${escapeHtml(user.name)}</div>
+                            <button class="invite-btn" onclick="inviteToChat('${child.key}', '${escapeHtml(user.name)}')">Пригласить</button>
+                        </div>
+                    `;
+                }
+            });
+            if (count === 0) html += '<div style="padding:0.5rem; color:#999;">Нет других онлайн</div>';
+            onlineDiv.innerHTML = html;
+            document.getElementById('onlineCount') && (document.getElementById('onlineCount').innerText = count);
+        });
+
+        // Список чатов (только где пользователь участник)
         db.ref('chats').on('value', (snapshot) => {
             const chatsDiv = document.getElementById('chatsList');
             if (!chatsDiv) return;
-            let html = '<div class="chat-list">';
+            let html = '';
             snapshot.forEach(child => {
                 const chat = child.val();
+                const members = chat.members || [];
+                if (!members.includes(currentUser.uid)) return;
                 html += `
                     <div class="chat-item">
                         <div class="chat-name" onclick="joinChat('${child.key}')">💬 ${escapeHtml(chat.name)}</div>
@@ -215,11 +362,10 @@
                     </div>
                 `;
             });
-            html += '</div>';
-            chatsDiv.innerHTML = html || '<p>Нет чатов. Создайте первый!</p>';
+            chatsDiv.innerHTML = html || '<div style="padding:0.5rem;">Нет чатов. Создайте первый!</div>';
         });
 
-        // Сообщения и название чата
+        // Сообщения
         if (currentChatId) {
             db.ref(`chats/${currentChatId}`).once('value', (snap) => {
                 const titleDiv = document.getElementById('chatTitle');
@@ -240,7 +386,8 @@
                     html += `
                         <div class="message ${isOwn ? 'message-own' : ''}">
                             <div class="message-author">${escapeHtml(msg.authorName)}</div>
-                            <div class="message-text">${escapeHtml(msg.text)}</div>
+                            <div class="message-text">${escapeHtml(msg.text || '')}</div>
+                            ${msg.photoUrl ? `<img src="${msg.photoUrl}" class="message-image" onclick="window.open('${msg.photoUrl}')">` : ''}
                             <div class="message-time">
                                 ${new Date(msg.timestamp).toLocaleString()}
                                 ${isOwn ? `<span class="delete-msg" onclick="deleteMessage('${currentChatId}', '${msg.id}', '${msg.authorId}')">[удалить]</span>` : ''}
@@ -252,11 +399,24 @@
                 container.scrollTop = container.scrollHeight;
             });
         }
+
+        // Фокус на поле ввода
+        setTimeout(() => {
+            const textarea = document.getElementById('messageText');
+            if (textarea) {
+                textarea.addEventListener('keypress', (e) => {
+                    if (e.key === 'Enter' && !e.shiftKey) {
+                        e.preventDefault();
+                        sendMessage();
+                    }
+                });
+            }
+        }, 100);
     }
 
     function escapeHtml(str) {
         if (!str) return '';
-        return str.replace(/[&<>]/g, function(m) {
+        return String(str).replace(/[&<>]/g, function(m) {
             if (m === '&') return '&amp;';
             if (m === '<') return '&lt;';
             if (m === '>') return '&gt;';
@@ -264,6 +424,7 @@
         });
     }
 
+    // Глобальные функции
     window.createChat = createChat;
     window.deleteChat = deleteChat;
     window.joinChat = joinChat;
@@ -271,12 +432,16 @@
     window.deleteMessage = deleteMessage;
     window.deleteMyMessages = deleteMyMessages;
     window.clearWholeChat = clearWholeChat;
+    window.inviteToChat = inviteToChat;
     window.login = login;
     window.register = register;
     window.logout = logout;
 
     auth.onAuthStateChanged(user => {
         currentUser = user;
+        if (user) {
+            setOnlineStatus();
+        }
         if (!user) currentChatId = null;
         renderApp();
     });
