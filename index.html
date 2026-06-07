@@ -2,7 +2,7 @@
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>Чики Пуки Соцсеть | Realtime</title>
+    <title>Чики Пуки Соцсеть</title>
     <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-database-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-auth-compat.js"></script>
@@ -36,16 +36,15 @@
 <div id="app"></div>
 
 <script>
-    // ========== ВАШ КОНФИГ FIRESTBASE ==========
-    // ⚠️ ТОЛЬКО ЗАМЕНИТЕ databaseURL НА ВАШУ ССЫЛКУ ⚠️
+    // ========== ВАШ КОНФИГ ИЗ FIREBASE ==========
     const firebaseConfig = {
-        apiKey: "AIzaSyB8hzWpEGjE_hxZBhO-uTzJQ6oG_dPCD9I",  // Оставьте как есть (публичный ключ из вашего проекта)
+        apiKey: "AIzaSyDH0Go3vDMsasjf6unW39UhFklZC4GqPFc",
         authDomain: "network-6c0e9.firebaseapp.com",
-        databaseURL: "https://network-6c0e9-default-rtdb.europe-west1.firebasedatabase.app/",  // 👈 ВСТАВЬТЕ ВАШУ ССЫЛКУ
+        databaseURL: "https://network-6c0e9-default-rtdb.europe-west1.firebasedatabase.app",
         projectId: "network-6c0e9",
-        storageBucket: "network-6c0e9.appspot.com",
-        messagingSenderId: "1076128387905",
-        appId: "1:1076128387905:web:94b18e2e21454ca47fd1e1"
+        storageBucket: "network-6c0e9.firebasestorage.app",
+        messagingSenderId: "762011091923",
+        appId: "1:762011091923:web:3fe97b0fa4486c0545e526"
     };
 
     firebase.initializeApp(firebaseConfig);
@@ -89,7 +88,6 @@
             createdBy: currentUser.uid,
             createdAt: Date.now()
         });
-        renderApp();
     }
 
     // Удалить чат
